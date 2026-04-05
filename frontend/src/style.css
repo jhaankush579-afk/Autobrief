@@ -1,0 +1,20 @@
+.bubble {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: rgba(0, 150, 255, 0.7);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    animation: pop 0.6s ease-out forwards;
+    }
+@keyframes pop {
+    0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+    }
+    100% {
+    transform: translate(-50%, -50%) scale(4);
+    opacity: 0;
+    }
+}

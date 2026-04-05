@@ -1,0 +1,626 @@
+\documentclass[12pt, a4paper]{article}
+
+% ── Packages ───────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{parskip}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+
+% ── Listings style ─────────────────────────────────────────────────────
+\definecolor{codebg}{RGB}{245,245,250}
+\definecolor{codeframe}{RGB}{180,180,200}
+\definecolor{keyword}{RGB}{0,100,180}
+\definecolor{string}{RGB}{170,55,55}
+\definecolor{comment}{RGB}{100,140,100}
+
+\lstset{
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{codeframe},
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{keyword}\bfseries,
+  stringstyle=\color{string},
+  commentstyle=\color{comment}\itshape,
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  tabsize=4,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+  xleftmargin=2em,
+  framexleftmargin=1.5em,
+  captionpos=b,
+}
+
+% ── Page style ─────────────────────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\textit{AutoBrief Documentation}}
+\lhead{\textit{\nouppercase{\leftmark}}}
+\cfoot{\thepage}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!70!black,
+  urlcolor=blue!60!black,
+  citecolor=green!50!black,
+}
+
+% ── Title ──────────────────────────────────────────────────────────────
+\title{%
+  \textbf{AutoBrief: Automated Daily Briefing Bot}\\[0.5em]
+  \large Full-Stack Application --- Design, Architecture, and Implementation Guide
+}
+\author{AutoBrief Project Documentation}
+\date{March 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ======================================================================
+\section{Introduction}
+% ======================================================================
+
+AutoBrief is a full-stack web application that automates the generation and delivery of personalized daily briefings. It aggregates weather data, top news headlines, and a user's class schedule, then sends a formatted summary via Telegram at a configurable time each day.
+
+\subsection{Key Design Principles}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Zero-cost external APIs}: Weather via Open-Meteo (free, no API key), news via Google News RSS (free, no API key). Only Telegram requires a free bot token from BotFather.
+  \item \textbf{Self-contained}: SQLite database requires no external database server. APScheduler runs inside the application process.
+  \item \textbf{Preview without Telegram}: The application supports a preview mode --- users can see their briefing message without configuring Telegram.
+\end{itemize}
+
+% ======================================================================
+\section{System Architecture}
+% ======================================================================
+
+The system follows a client-server architecture with three main layers:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Frontend} (React + Vite + Tailwind CSS): Single-page dashboard for configuration and manual triggering.
+  \item \textbf{Backend} (Python + FastAPI): RESTful API server with CRUD endpoints, the briefing engine, and background scheduler.
+  \item \textbf{Data Layer} (SQLite + SQLAlchemy): Persistent storage for user preferences and class schedule.
+\end{enumerate}
+
+\subsection{Architecture Diagram}
+
+\begin{verbatim}
++-------------------+       HTTP/JSON        +-------------------+
+|                   | <--------------------> |                   |
+|   React Frontend  |   /api/* (proxied)     |  FastAPI Backend  |
+|   (Vite :5173)    |                        |  (Uvicorn :8000)  |
+|                   |                        |                   |
++-------------------+                        +--------+----------+
+                                                      |
+                                  +-------------------+-------------------+
+                                  |                   |                   |
+                           +------+------+    +-------+------+   +-------+-------+
+                           |  SQLite DB  |    | Open-Meteo   |   | Google News   |
+                           | (local file)|    | (free API)   |   | (RSS feed)    |
+                           +-------------+    +--------------+   +---------------+
+                                                      |
+                                              +-------+-------+
+                                              | Telegram Bot  |
+                                              | API (free)    |
+                                              +---------------+
+\end{verbatim}
+
+\subsection{Request Flow}
+
+When a user clicks ``Preview Briefing'':
+
+\begin{enumerate}[leftmargin=2em]
+  \item React sends \texttt{POST /api/preview} to the backend.
+  \item FastAPI instantiates a \texttt{BriefingEngine}.
+  \item The engine reads user preferences from SQLite.
+  \item It concurrently fetches weather (Open-Meteo) and news (Google News RSS).
+  \item It reads today's class schedule from SQLite.
+  \item It builds a Markdown message and returns it in the JSON response.
+  \item React renders the message in a preview panel.
+\end{enumerate}
+
+% ======================================================================
+\section{Directory Structure}
+% ======================================================================
+
+\begin{lstlisting}[language={}, title={Project Tree}]
+AutoBrief/
+  .env                        # Environment variables (Telegram token)
+  .env.example                # Template for .env
+  README.md                   # Quick-start guide
+  autobrief_doc.tex           # This document
+  backend/
+    config.py                 # Loads env vars
+    database.py               # SQLAlchemy engine, session, init
+    models.py                 # ORM models (UserPreferences, ClassSchedule)
+    briefing.py               # BriefingEngine (weather, news, Telegram)
+    scheduler.py              # APScheduler cron job setup
+    main.py                   # FastAPI app, routes, lifespan
+    requirements.txt          # Python dependencies
+    tests.py                  # Comprehensive test suite (23 tests)
+    venv/                     # Python virtual environment
+  frontend/
+    index.html                # HTML entry point
+    package.json              # Node.js dependencies
+    vite.config.js            # Vite config with API proxy
+    tailwind.config.js        # Tailwind CSS config
+    postcss.config.js         # PostCSS config
+    src/
+      main.jsx                # React entry point
+      index.css               # Tailwind directives
+      App.jsx                 # Dashboard components
+    node_modules/             # Node.js packages
+\end{lstlisting}
+
+% ======================================================================
+\section{Technology Stack}
+% ======================================================================
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Layer} & \textbf{Technology} & \textbf{Purpose} \\
+\midrule
+Frontend       & React 18            & UI components and state management \\
+               & Vite 6              & Build tool and dev server \\
+               & Tailwind CSS 3      & Utility-first CSS framework \\
+               & Axios               & HTTP client for API calls \\
+\midrule
+Backend        & Python 3.11+        & Server-side language \\
+               & FastAPI 0.115       & Async web framework with auto docs \\
+               & SQLAlchemy 2.0      & ORM for database access \\
+               & APScheduler 3.10    & In-process cron-like scheduler \\
+               & httpx 0.28          & Async HTTP client \\
+               & feedparser 6.0      & RSS/Atom feed parser \\
+\midrule
+Database       & SQLite              & File-based relational database \\
+\midrule
+External APIs  & Open-Meteo          & Weather data (free, no key) \\
+               & Google News RSS     & News headlines (free, no key) \\
+               & Telegram Bot API    & Message delivery (free token) \\
+\bottomrule
+\end{tabular}
+\caption{Technology stack overview}
+\end{table}
+
+% ======================================================================
+\section{Database Models}
+% ======================================================================
+
+The application uses two SQLAlchemy ORM models backed by SQLite.
+
+\subsection{UserPreferences}
+
+Stores the user's configuration for the briefing engine. Only one row exists (singleton pattern --- upserted on save).
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Nullable} & \textbf{Description} \\
+\midrule
+id               & Integer (PK)  & No  & Auto-increment primary key \\
+city             & String        & No  & City name for weather lookup \\
+news\_topics     & String        & No  & Comma-separated news search terms \\
+telegram\_chat\_id & String      & No  & Telegram chat ID for delivery \\
+\bottomrule
+\end{tabular}
+\caption{UserPreferences schema}
+\end{table}
+
+\begin{lstlisting}[language=Python, title={models.py --- UserPreferences}]
+class UserPreferences(Base):
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    city = Column(String, nullable=False, default="London")
+    news_topics = Column(String, nullable=False, default="technology")
+    telegram_chat_id = Column(String, nullable=False, default="")
+\end{lstlisting}
+
+\subsection{ClassSchedule}
+
+Stores weekly class schedule entries. Multiple entries per day are supported, ordered by time.
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Column} & \textbf{Type} & \textbf{Nullable} & \textbf{Description} \\
+\midrule
+id            & Integer (PK)  & No  & Auto-increment primary key \\
+day\_of\_week & String        & No  & Day name (Monday--Sunday) \\
+time          & String        & No  & 24h time string (e.g., ``09:00'') \\
+subject       & String        & No  & Class/course name \\
+location      & String        & No  & Room or building (optional) \\
+\bottomrule
+\end{tabular}
+\caption{ClassSchedule schema}
+\end{table}
+
+% ======================================================================
+\section{Backend Implementation}
+% ======================================================================
+
+\subsection{Configuration (\texttt{config.py})}
+
+Environment variables are loaded from a \texttt{.env} file using \texttt{python-dotenv}. The only required secret is the Telegram bot token (and even that is optional for preview mode).
+
+\begin{lstlisting}[language=Python, title={config.py}]
+import os
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+BRIEFING_HOUR = int(os.getenv("BRIEFING_HOUR", "7"))
+BRIEFING_MINUTE = int(os.getenv("BRIEFING_MINUTE", "0"))
+DATABASE_URL = "sqlite:///" + os.path.join(
+    os.path.dirname(__file__), "autobrief.db"
+)
+\end{lstlisting}
+
+\subsection{Database Layer (\texttt{database.py})}
+
+Uses SQLAlchemy 2.0 declarative base with a session factory. The \texttt{get\_db} generator provides dependency-injected sessions to FastAPI route handlers.
+
+\begin{lstlisting}[language=Python, title={database.py}]
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from config import DATABASE_URL
+
+engine = create_engine(DATABASE_URL,
+                       connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False,
+                            bind=engine)
+
+class Base(DeclarativeBase):
+    pass
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+\end{lstlisting}
+
+\subsection{Briefing Engine (\texttt{briefing.py})}
+
+The core service class that orchestrates data fetching and message construction.
+
+\subsubsection{Weather Fetcher --- Open-Meteo}
+
+Uses a two-step process:
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Geocoding}: Resolves city name to latitude/longitude via \texttt{geocoding-api.open-meteo.com}.
+  \item \textbf{Forecast}: Fetches current weather using the coordinates via \texttt{api.open-meteo.com}.
+\end{enumerate}
+
+WMO weather interpretation codes are mapped to human-readable descriptions (e.g., code 3 becomes ``Overcast'').
+
+\subsubsection{News Fetcher --- Google News RSS}
+
+Fetches headlines by constructing a Google News RSS search URL with the user's topics, then parses the feed using the \texttt{feedparser} library. Article titles are split to extract the source name.
+
+\subsubsection{Message Builder}
+
+Constructs a Markdown-formatted message with three sections:
+\begin{itemize}[leftmargin=2em]
+  \item Weather: city, temperature, humidity, wind speed, conditions
+  \item Headlines: numbered list of top 3 articles with sources
+  \item Schedule: today's classes with times and locations
+\end{itemize}
+
+Each section gracefully handles missing data (e.g., ``unavailable'' for weather failures).
+
+\subsubsection{Telegram Sender}
+
+Posts the formatted message to the Telegram Bot API using \texttt{httpx}. Returns early with a descriptive result if the bot token is not configured.
+
+\subsubsection{Orchestrator (\texttt{run} method)}
+
+The \texttt{run(preview\_only=False)} method:
+\begin{enumerate}[leftmargin=2em]
+  \item Reads preferences from the database.
+  \item Fetches weather and news (failures are caught individually).
+  \item Reads today's class schedule.
+  \item Builds the message.
+  \item If \texttt{preview\_only=True} or no chat ID: returns the message without sending.
+  \item Otherwise: sends via Telegram and returns the result.
+\end{enumerate}
+
+\subsection{Scheduler (\texttt{scheduler.py})}
+
+Uses APScheduler's \texttt{BackgroundScheduler} with a \texttt{cron} trigger. The job runs daily at the configured hour and minute (default: 07:00).
+
+Since APScheduler uses synchronous jobs but the \texttt{BriefingEngine} is async, a wrapper function creates a new event loop to run the coroutine:
+
+\begin{lstlisting}[language=Python, title={scheduler.py}]
+def _run_briefing_sync() -> None:
+    engine = BriefingEngine()
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(engine.run())
+        print(f"[Scheduler] Briefing result: {result}")
+    finally:
+        loop.close()
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    _run_briefing_sync,
+    trigger="cron",
+    hour=BRIEFING_HOUR,
+    minute=BRIEFING_MINUTE,
+    id="daily_briefing",
+    replace_existing=True,
+)
+\end{lstlisting}
+
+\subsection{FastAPI Application (\texttt{main.py})}
+
+\subsubsection{Lifespan Management}
+
+The application uses FastAPI's async context manager lifespan to:
+\begin{itemize}[leftmargin=2em]
+  \item Initialize the database tables on startup.
+  \item Start the APScheduler background scheduler.
+  \item Shut down the scheduler on application exit.
+\end{itemize}
+
+\subsubsection{CORS Middleware}
+
+Configured to allow requests from \texttt{http://localhost:5173} (the Vite dev server), with all methods and headers permitted.
+
+\subsubsection{API Endpoints}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}llp{7cm}@{}}
+\toprule
+\textbf{Method} & \textbf{Path} & \textbf{Description} \\
+\midrule
+GET    & \texttt{/api/preferences}       & Returns saved preferences (or null) \\
+POST   & \texttt{/api/preferences}       & Creates or updates the singleton preferences row \\
+GET    & \texttt{/api/schedule}           & Lists all schedule entries; optional \texttt{?day=Monday} filter \\
+POST   & \texttt{/api/schedule}           & Creates a new schedule entry \\
+PUT    & \texttt{/api/schedule/\{id\}}    & Updates an existing schedule entry \\
+DELETE & \texttt{/api/schedule/\{id\}}    & Deletes a schedule entry \\
+POST   & \texttt{/api/trigger}            & Runs the full briefing pipeline (with Telegram send) \\
+POST   & \texttt{/api/preview}            & Runs the briefing pipeline in preview mode (no send) \\
+\bottomrule
+\end{tabular}
+\caption{REST API endpoints}
+\end{table}
+
+% ======================================================================
+\section{Frontend Implementation}
+% ======================================================================
+
+The frontend is a single-page React application built with Vite and styled with Tailwind CSS.
+
+\subsection{Development Proxy}
+
+The Vite configuration proxies all \texttt{/api/*} requests to the FastAPI backend at \texttt{http://127.0.0.1:8000}, eliminating CORS issues during development:
+
+\begin{lstlisting}[language=JavaScript, title={vite.config.js}]
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    proxy: {
+      "/api": "http://127.0.0.1:8000",
+    },
+  },
+});
+\end{lstlisting}
+
+\subsection{Component Architecture}
+
+The \texttt{App.jsx} file contains four components:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{PreferencesForm}: Form with inputs for city, news topics, and Telegram chat ID. Loads existing preferences on mount, saves via POST.
+  \item \textbf{ScheduleManager}: Combined form and table for CRUD operations on class schedule entries. Supports inline editing and deletion.
+  \item \textbf{TriggerButton}: Two buttons --- ``Preview Briefing'' (calls \texttt{/api/preview}) and ``Send via Telegram'' (calls \texttt{/api/trigger}). Displays the formatted message in a preview panel.
+  \item \textbf{App}: Shell component with header, three card-style sections, and footer.
+\end{enumerate}
+
+\subsection{State Management}
+
+Each component manages its own local state using React's \texttt{useState} and \texttt{useEffect} hooks. API calls use Axios with a base URL of \texttt{/api} (proxied to the backend).
+
+% ======================================================================
+\section{External API Integration Details}
+% ======================================================================
+
+\subsection{Open-Meteo (Weather)}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Cost}: Completely free, no API key required.
+  \item \textbf{Geocoding endpoint}: \texttt{GET https://geocoding-api.open-meteo.com/v1/search?name=\{city\}\&count=1}
+  \item \textbf{Forecast endpoint}: \texttt{GET https://api.open-meteo.com/v1/forecast} with parameters for latitude, longitude, and current weather.
+  \item \textbf{Data returned}: Temperature (Celsius), wind speed (km/h), WMO weather code, hourly humidity.
+  \item \textbf{Rate limits}: Fair use (no hard limit for reasonable usage).
+\end{itemize}
+
+\subsection{Google News RSS (News)}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Cost}: Completely free, no API key required.
+  \item \textbf{Endpoint}: \texttt{GET https://news.google.com/rss/search?q=\{query\}\&hl=en-US\&gl=US\&ceid=US:en}
+  \item \textbf{Parser}: The \texttt{feedparser} library parses the RSS XML response.
+  \item \textbf{Data returned}: Article title, source name (extracted from title suffix), and URL.
+\end{itemize}
+
+\subsection{Telegram Bot API (Delivery)}
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Cost}: Free. Requires creating a bot via BotFather (\texttt{@BotFather} on Telegram).
+  \item \textbf{Setup}: Message BotFather with \texttt{/newbot}, follow prompts, receive a token.
+  \item \textbf{Chat ID}: Start a conversation with the bot, then use \texttt{https://api.telegram.org/bot\{TOKEN\}/getUpdates} to find your chat ID.
+  \item \textbf{Endpoint}: \texttt{POST https://api.telegram.org/bot\{TOKEN\}/sendMessage}
+\end{itemize}
+
+% ======================================================================
+\section{Test Suite}
+% ======================================================================
+
+The project includes 23 automated tests in \texttt{tests.py}, organized into five test classes:
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}llc@{}}
+\toprule
+\textbf{Test Class} & \textbf{Coverage} & \textbf{Count} \\
+\midrule
+TestModels             & SQLAlchemy model creation            & 2 \\
+TestPreferencesAPI     & GET/POST preferences CRUD            & 3 \\
+TestScheduleAPI        & Full CRUD + edge cases               & 7 \\
+TestBriefingEngine     & Weather, news, message builder, run  & 8 \\
+TestTriggerAPI         & Trigger and preview endpoints         & 3 \\
+\midrule
+\textbf{Total}         &                                      & \textbf{23} \\
+\bottomrule
+\end{tabular}
+\caption{Test suite overview}
+\end{table}
+
+\subsection{Test Infrastructure}
+
+\begin{itemize}[leftmargin=2em]
+  \item Uses an in-memory SQLite database with \texttt{StaticPool} to share connections across threads.
+  \item Each test gets fresh tables via an \texttt{autouse} fixture.
+  \item FastAPI's dependency injection is overridden to use the test database.
+  \item Integration tests hit the real Open-Meteo and Google News APIs (both free).
+  \item \texttt{briefing.SessionLocal} is patched in orchestrator tests to use the test database.
+\end{itemize}
+
+Running the tests:
+
+\begin{lstlisting}[language=bash, title={Running tests}]
+cd backend
+source venv/bin/activate
+python -m pytest tests.py -v
+\end{lstlisting}
+
+% ======================================================================
+\section{Setup and Execution Guide}
+% ======================================================================
+
+\subsection{Prerequisites}
+
+\begin{itemize}[leftmargin=2em]
+  \item Python 3.11 or newer
+  \item Node.js 18 or newer
+  \item (Optional) A Telegram bot token from BotFather (free)
+\end{itemize}
+
+\subsection{Environment Configuration}
+
+Edit the \texttt{.env} file in the project root:
+
+\begin{lstlisting}[language=bash, title={.env}]
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+BRIEFING_HOUR=7
+BRIEFING_MINUTE=0
+\end{lstlisting}
+
+The Telegram token is optional --- the app works in preview mode without it.
+
+\subsection{Backend Setup}
+
+\begin{lstlisting}[language=bash, title={Backend setup commands}]
+cd backend
+python3 -m venv venv
+source venv/bin/activate        # macOS/Linux
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+\end{lstlisting}
+
+The API will be available at \texttt{http://127.0.0.1:8000}. Interactive API docs are at \texttt{http://127.0.0.1:8000/docs}.
+
+\subsection{Frontend Setup}
+
+\begin{lstlisting}[language=bash, title={Frontend setup commands}]
+cd frontend
+npm install
+npm run dev
+\end{lstlisting}
+
+The dashboard will be available at \texttt{http://localhost:5173}.
+
+\subsection{Usage Workflow}
+
+\begin{enumerate}[leftmargin=2em]
+  \item Open \texttt{http://localhost:5173} in a browser.
+  \item Fill in preferences: city name, news topics, and (optionally) Telegram chat ID.
+  \item Click ``Save Preferences''.
+  \item Add class schedule entries using the schedule form.
+  \item Click ``Preview Briefing'' to see the formatted message.
+  \item (With Telegram configured) Click ``Send via Telegram'' to deliver it.
+  \item The scheduler automatically sends the briefing daily at the configured time.
+\end{enumerate}
+
+% ======================================================================
+\section{Sample Briefing Output}
+% ======================================================================
+
+Below is an actual briefing message generated by the system during testing:
+
+\begin{lstlisting}[language={}, title={Sample briefing (March 16, 2026)}]
+*Daily Briefing -- Monday, March 16, 2026*
+
+*Weather*
+City: New York
+Temp: 15.0 C
+Humidity: 69%
+Wind: 26.2 km/h
+Conditions: Overcast
+
+*Top Headlines*
+1. Zelenskiy says Ukraine wants money, technology
+   in return for Middle East drone help (Reuters)
+2. What Iran's war reveals about future of defense
+   technology (The Jerusalem Post)
+3. Gorilla Technology & Yotta Sign Landmark AI
+   Infrastructure Deal (Gorilla Technology)
+
+*Today's Classes (Monday)*
+- 09:00  Data Structures -- Room 302
+
+_Have a productive day!_
+\end{lstlisting}
+
+% ======================================================================
+\section{Conclusion}
+% ======================================================================
+
+AutoBrief demonstrates a complete full-stack application with the following characteristics:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Zero-cost operation}: All external APIs (Open-Meteo, Google News RSS) are completely free with no API keys required. Only Telegram needs a free bot token.
+  \item \textbf{Self-contained deployment}: SQLite eliminates database server dependency. APScheduler runs in-process.
+  \item \textbf{Comprehensive testing}: 23 automated tests covering models, API endpoints, the briefing engine, and integration with external APIs.
+  \item \textbf{Graceful degradation}: Individual API failures are caught and the briefing still generates with available data.
+  \item \textbf{Preview mode}: Full briefing generation without Telegram configuration for development and testing.
+\end{itemize}
+
+\end{document}
