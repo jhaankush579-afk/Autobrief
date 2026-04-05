@@ -11,7 +11,7 @@ const DAYS = [
   "Sunday",
 ];
 
-const api = axios.create({ baseURL: "/api" });
+const api = axios.create({ baseURL: "https://autobrief-1.onrender.com" });
 
 // ─── Preferences Form ──────────────────────────────────────────────────────
 
